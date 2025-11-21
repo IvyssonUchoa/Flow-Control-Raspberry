@@ -9,19 +9,26 @@ from typing import List, Dict
 
 # --- CONFIGURAÇÃO ---
 IMAGE_SAVE_PATH = "captured_images/current_capture.jpg"
+LOG_SAVE_PATH = "logs/results_log.txt"
+
 ESP32_CAM_URL = "http://192.168.1.14/capture" # AJUSTE O IP!
 MODEL_PATH = "best_nano.onnx" 
+
 BROKER = "192.168.1.8"
 PORT = 1883
 TOPIC = "hidroponia/servo"
-LOOP_INTERVAL_SECONDS = 10 
+LOOP_INTERVAL_SECONDS = 3600  # 1 hora
 
+# --------------------
 # Garante que o diretório de salvamento exista
 os.makedirs(os.path.dirname(IMAGE_SAVE_PATH), exist_ok=True)
+
+# Garante que o diretório de Logs exista
+os.makedirs(os.path.dirname(LOG_SAVE_PATH), exist_ok=True)
 # --------------------
 
 # ----------------------------------------------------------------------
-# CLASSE: ONNXYOLODetector (MODIFICADA: Retorna a lista de nomes das fases)
+# CLASSE: ONNXYOLODetector (Retorna a lista de nomes das fases)
 # ----------------------------------------------------------------------
 
 class ONNXYOLODetector:
@@ -121,7 +128,24 @@ class ONNXYOLODetector:
             return []
 
 # ----------------------------------------------------------------------
-# FUNÇÃO DE CAPTURA E SALVAMENTO (Inalterada)
+# FUNÇÃO DE REGISTROS LOGS
+# ----------------------------------------------------------------------
+
+def log_results(status, data):
+    """
+    Abre um log para registrar os resultados de processamento e erros. 
+    """
+
+    with open(LOG_SAVE_PATH, "a") as log:
+        log_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        message = f"[{log_date}] - {status} - {data}\n"
+
+        log.write(message)
+
+    return
+
+# ----------------------------------------------------------------------
+# FUNÇÃO DE CAPTURA E SALVAMENTO
 # ----------------------------------------------------------------------
 
 def capture_and_save_image(url: str, save_path: str):
@@ -149,9 +173,23 @@ def capture_and_save_image(url: str, save_path: str):
         
     except requests.exceptions.RequestException as e:
         print(f"❌ Erro na requisição HTTP (ESP32-CAM): {e}")
+
+        # Registra o log
+        log_results(
+            status="FALHA",
+            data=f"Erro na requisição HTTP (ESP32-CAM): {e}"
+        )
+
         return False
     except Exception as e:
         print(f"❌ Erro ao processar/salvar a imagem: {e}")
+
+        # Registra o log
+        log_results(
+            status="FALHA",
+            data=f"Erro ao processar/salvar a imagem: {e}"
+        )
+
         return False
 
 # ----------------------------------------------------------------------
@@ -197,12 +235,24 @@ while True:
             first_phase = detected_phases[0]
             angle_to_send = detector.fase_to_angle.get(first_phase, 0) # Usa 0 se não encontrar
             
+            # Registra o log
+            log_results(
+                status="SUCESSO",
+                data=f"Fases detectadas: {detected_phases} | Angulo correspondente: {angle_to_send}"
+            )
+
             # 3. ENVIO MQTT
             client.publish(TOPIC, str(angle_to_send))
             print(f"🎉 Ângulo correspondente enviado via MQTT ({first_phase}) → {angle_to_send}°")
             
         else:
             print("🧐 Nenhuma fase detectada no arquivo capturado.")
+
+            # Registra o log
+            log_results(
+                status="FALHA",
+                data=f"Nenhuma fase detectada no arquivo capturado"
+            )
             
     else:
         print("\n🤷 Pulando processamento: Falha na captura de imagem.")
